@@ -17,25 +17,44 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg libsndfile1
 
       - name: Install f5-myanmar-tts and fix audio backend
         run: |
-          # 1. Install f5-myanmar-tts
           pip install f5-myanmar-tts
-          
-          # 2. Force CPU-only PyTorch to avoid CUDA conflicts
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          
-          # 3. Uninstall torchcodec (This is the main culprit for the error)
+          # Uninstall torchcodec to prevent CUDA library errors
           pip uninstall -y torchcodec
-          
-          # 4. Install soundfile as the fallback audio backend for torchaudio
+          # Install soundfile as the audio backend replacement
           pip install soundfile
 
-      - name: Run TTS
+      - name: Run TTS with custom audio loader
         run: |
-          f5-myanmar "မင်္ဂလာပါ ခင်ဗျာ။ ဒီအသံက GitHub Actions ကနေ ဖန်တီးထားတာပါ။" -o output.wav
+          python -c "
+          import torch
+          import torchaudio
+          import soundfile as sf
+
+          # 1. Monkeypatch torchaudio.load to use soundfile instead of torchcodec
+          def soundfile_load(filepath, *args, **kwargs):
+              data, samplerate = sf.read(filepath)
+              tensor = torch.from_numpy(data).float()
+              if len(tensor.shape) == 1:
+                  tensor = tensor.unsqueeze(0)
+              else:
+                  tensor = tensor.t()
+              return tensor, samplerate
+
+          torchaudio.load = soundfile_load
+
+          # 2. Run the TTS
+          from f5_myanmar_tts import MyanmarTTS
+          tts = MyanmarTTS()
+          tts.speak(
+              'မင်္ဂလာပါ ခင်ဗျာ။ ဒီအသံက GitHub Actions ကနေ ဖန်တီးထားတာပါ။',
+              output_file='output.wav'
+          )
+          print('Audio generated successfully!')
+          "
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
