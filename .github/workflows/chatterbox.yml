@@ -1,50 +1,75 @@
-name: Test Chatterbox TTS
+name: Chatterbox TTS on Colab GPU
 
 on:
   workflow_dispatch:
+    inputs:
+      text:
+        description: 'Poem text to synthesize'
+        required: true
+        default: 'Two roads diverged in a yellow wood, And sorry I could not travel both And be one traveler, long I stood And looked down one as far as I could To where it bent in the undergrowth;'
 
 jobs:
-  tts:
+  synthesize:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1
+      - name: Install Colab CLI
+        run: pip install colab-cli
 
-      - name: Install Chatterbox TTS
+      - name: Authenticate with Google Colab
+        env:
+          COLAB_ADC_CREDENTIALS: ${{ secrets.COLAB_ADC_CREDENTIALS }}
         run: |
-          pip install chatterbox-tts
-          pip install soundfile numpy
+          mkdir -p ~/.config/colab
+          echo "$COLAB_ADC_CREDENTIALS" > ~/.config/colab/credentials.json
+          colab whoami
 
-      - name: Generate poetry reading
+      - name: Create Colab GPU Session
         run: |
-          python -c "
+          colab new -s tts-session --gpu T4
+          colab status -s tts-session
+
+      - name: Setup Chatterbox on Colab
+        run: |
+          colab exec -s tts-session -- python -c "
+          !pip install chatterbox-tts soundfile
+          import torch
+          print('CUDA available:', torch.cuda.is_available())
+          "
+
+      - name: Generate Audio on Colab
+        env:
+          POEM_TEXT: ${{ github.event.inputs.text }}
+        run: |
+          colab exec -s tts-session -- python -c "
           import torchaudio as ta
           from chatterbox.tts import ChatterboxTTS
+          import os
           
-          model = ChatterboxTTS.from_pretrained(device='cpu')
-          
-          text = '''Two roads diverged in a yellow wood,
-          And sorry I could not travel both
-          And be one traveler, long I stood
-          And looked down one as far as I could
-          To where it bent in the undergrowth;'''
-          
+          model = ChatterboxTTS.from_pretrained(device='cuda')
+          text = os.environ['POEM_TEXT']
           wav = model.generate(text, exaggeration=0.7, cfg_weight=0.3)
-          ta.save('poetry_output.wav', wav, model.sr)
+          ta.save('output.wav', wav, model.sr)
           print('Audio generated!')
           "
 
-      - name: Upload artifact
+      - name: Download Audio
+        run: |
+          colab download -s tts-session output.wav
+
+      - name: Stop Colab Session
+        if: always()
+        run: colab stop -s tts-session
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chatterbox-poetry
-          path: poetry_output.wav
+          name: chatterbox-audio
+          path: output.wav
