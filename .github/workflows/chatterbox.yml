@@ -84,7 +84,12 @@ jobs:
           colab --auth=adc upload -s "$SESSION" generate_audio.py /content/generate_audio.py
           cat > run_generate.py << 'EOF'
           import subprocess, sys
-          r = subprocess.run([sys.executable, '/content/generate_audio.py'])
+          r = subprocess.run([sys.executable, '/content/generate_audio.py'],
+                             capture_output=True, text=True)
+          print("=== STDOUT ===", flush=True)
+          print(r.stdout, flush=True)
+          print("=== STDERR ===", flush=True)
+          print(r.stderr[-6000:], flush=True)
           print(f"EXIT_CODE: {r.returncode}", flush=True)
           if r.returncode != 0:
               print("FATAL: generate_audio.py exited non-zero", flush=True)
