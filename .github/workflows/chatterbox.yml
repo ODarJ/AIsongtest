@@ -11,49 +11,65 @@ on:
 jobs:
   synthesize:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90 # မော်ဒယ် download လုပ်တာအတွက် အချိန်ယူနိုင်ပါတယ်
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.12"
 
       - name: Install Colab CLI
         run: |
-          pip install colab-cli
-          # ဒီအဆင့်က အရေးကြီးဆုံးပါ။ ~/.local/bin ကို PATH ထဲ ထည့်ပေးလိုက်တာပါ။
+          # htlin222 သုံးထားတဲ့ package အတိအကျပါ
+          pip install --user 'jupyter-kernel-client<1.0' google-colab-cli
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Authenticate with Google Colab
+      - name: Write Colab ADC credentials
         env:
-          COLAB_ADC_CREDENTIALS: ${{ secrets.COLAB_ADC_CREDENTIALS }}
+          COLAB_ADC_JSON: ${{ secrets.COLAB_ADC_CREDENTIALS }}
         run: |
-          mkdir -p ~/.config/colab
-          echo "$COLAB_ADC_CREDENTIALS" > ~/.config/colab/credentials.json
-          colab whoami
+          if [ -z "$COLAB_ADC_JSON" ]; then
+            echo "::error::COLAB_ADC_CREDENTIALS secret is not set."
+            exit 1
+          fi
+          mkdir -p "$HOME/.config/gcloud"
+          printf '%s' "$COLAB_ADC_JSON" > "$HOME/.config/gcloud/application_default_credentials.json"
 
-      - name: Create Colab GPU Session
+      - name: Provision Colab T4 session
+        id: colab_new
         run: |
-          colab new -s tts-session --gpu T4
-          colab status -s tts-session
+          SESSION="ci-${{ github.run_id }}"
+          echo "session=$SESSION" >> "$GITHUB_OUTPUT"
+          for attempt in 1 2 3; do
+            if colab --auth=adc new -s "$SESSION" --gpu T4; then
+              exit 0
+            fi
+            echo "::warning::colab new attempt $attempt failed; retrying in 60s..."
+            sleep 60
+          done
+          echo "::error::colab new failed after 3 attempts"
+          exit 1
 
       - name: Setup Chatterbox on Colab
         run: |
-          # ! သင်္ကေတကို ဖြုတ်လိုက်ပါပြီ
-          colab exec -s tts-session -- python -c "
+          SESSION="${{ steps.colab_new.outputs.session }}"
+          colab --auth=adc exec -s "$SESSION" -- python -c "
           import subprocess
           subprocess.run(['pip', 'install', 'chatterbox-tts', 'soundfile'])
           import torch
           print('CUDA available:', torch.cuda.is_available())
-          "
+          " --timeout 600
 
       - name: Generate Audio on Colab
         env:
           POEM_TEXT: ${{ github.event.inputs.text }}
         run: |
-          colab exec -s tts-session -- python -c "
+          SESSION="${{ steps.colab_new.outputs.session }}"
+          colab --auth=adc exec -s "$SESSION" -- python -c "
           import torchaudio as ta
           from chatterbox.tts import ChatterboxTTS
           import os
@@ -63,15 +79,18 @@ jobs:
           wav = model.generate(text, exaggeration=0.7, cfg_weight=0.3)
           ta.save('output.wav', wav, model.sr)
           print('Audio generated!')
-          "
+          " --timeout 1200
 
       - name: Download Audio
         run: |
-          colab download -s tts-session output.wav
+          SESSION="${{ steps.colab_new.outputs.session }}"
+          colab --auth=adc download -s "$SESSION" /content/output.wav ./output.wav
 
-      - name: Stop Colab Session
+      - name: Stop Colab session
         if: always()
-        run: colab stop -s tts-session
+        run: |
+          SESSION="${{ steps.colab_new.outputs.session }}"
+          colab --auth=adc stop -s "$SESSION" || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
