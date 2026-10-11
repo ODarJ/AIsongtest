@@ -21,7 +21,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install Colab CLI
-        run: pip install colab-cli
+        run: |
+          pip install colab-cli
+          # ဒီအဆင့်က အရေးကြီးဆုံးပါ။ ~/.local/bin ကို PATH ထဲ ထည့်ပေးလိုက်တာပါ။
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Authenticate with Google Colab
         env:
@@ -38,8 +41,10 @@ jobs:
 
       - name: Setup Chatterbox on Colab
         run: |
+          # ! သင်္ကေတကို ဖြုတ်လိုက်ပါပြီ
           colab exec -s tts-session -- python -c "
-          !pip install chatterbox-tts soundfile
+          import subprocess
+          subprocess.run(['pip', 'install', 'chatterbox-tts', 'soundfile'])
           import torch
           print('CUDA available:', torch.cuda.is_available())
           "
