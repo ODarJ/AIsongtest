@@ -70,11 +70,10 @@ jobs:
         run: |
           set -o pipefail
           SESSION="${{ steps.colab_new.outputs.session }}"
-          # -f မှာ local path (setup_chatterbox.py) ကို ပေးရပါတယ်
           colab --auth=adc exec -s "$SESSION" -f setup_chatterbox.py --timeout 1800 \
             2>&1 | tee /tmp/exec_setup.log
-          if grep -q '^FATAL:' /tmp/exec_setup.log; then
-            echo "::error::setup_chatterbox.py reported FATAL"
+          if grep -qE '^FATAL:|Traceback \(most recent call last\)' /tmp/exec_setup.log; then
+            echo "::error::setup_chatterbox.py failed"
             exit 1
           fi
 
@@ -82,11 +81,18 @@ jobs:
         run: |
           set -o pipefail
           SESSION="${{ steps.colab_new.outputs.session }}"
-          # -f မှာ local path (generate_audio.py) ကို ပေးရပါတယ်
-          colab --auth=adc exec -s "$SESSION" -f generate_audio.py --timeout 1800 \
+          colab --auth=adc upload -s "$SESSION" generate_audio.py /content/generate_audio.py
+          cat > run_generate.py << 'EOF'
+          import subprocess, sys
+          r = subprocess.run([sys.executable, '/content/generate_audio.py'])
+          print(f"EXIT_CODE: {r.returncode}", flush=True)
+          if r.returncode != 0:
+              print("FATAL: generate_audio.py exited non-zero", flush=True)
+          EOF
+          colab --auth=adc exec -s "$SESSION" -f run_generate.py --timeout 1800 \
             2>&1 | tee /tmp/exec_generate.log
-          if grep -q '^FATAL:' /tmp/exec_generate.log; then
-            echo "::error::generate_audio.py reported FATAL"
+          if grep -qE '^FATAL:|Traceback \(most recent call last\)' /tmp/exec_generate.log; then
+            echo "::error::generate step failed (see log above)"
             exit 1
           fi
 
