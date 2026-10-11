@@ -14,15 +14,24 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install PyTorch (CPU)
+      - name: Install system dependencies
         run: |
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: Install f5-myanmar-tts
-        run: pip install f5-myanmar-tts
+      - name: Install f5-myanmar-tts and fix audio backend
+        run: |
+          # 1. Install f5-myanmar-tts
+          pip install f5-myanmar-tts
+          
+          # 2. Force CPU-only PyTorch to avoid CUDA conflicts
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          
+          # 3. Uninstall torchcodec (This is the main culprit for the error)
+          pip uninstall -y torchcodec
+          
+          # 4. Install soundfile as the fallback audio backend for torchaudio
+          pip install soundfile
 
       - name: Run TTS
         run: |
