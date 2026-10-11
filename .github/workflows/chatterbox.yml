@@ -1,0 +1,50 @@
+name: Test Chatterbox TTS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1
+
+      - name: Install Chatterbox TTS
+        run: |
+          pip install chatterbox-tts
+          pip install soundfile numpy
+
+      - name: Generate poetry reading
+        run: |
+          python -c "
+          import torchaudio as ta
+          from chatterbox.tts import ChatterboxTTS
+          
+          model = ChatterboxTTS.from_pretrained(device='cpu')
+          
+          text = '''Two roads diverged in a yellow wood,
+          And sorry I could not travel both
+          And be one traveler, long I stood
+          And looked down one as far as I could
+          To where it bent in the undergrowth;'''
+          
+          wav = model.generate(text, exaggeration=0.7, cfg_weight=0.3)
+          ta.save('poetry_output.wav', wav, model.sr)
+          print('Audio generated!')
+          "
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatterbox-poetry
+          path: poetry_output.wav
