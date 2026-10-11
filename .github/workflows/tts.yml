@@ -24,17 +24,18 @@ jobs:
           pip install f5-myanmar-tts
           # Uninstall torchcodec to prevent CUDA library errors
           pip uninstall -y torchcodec
-          # Install soundfile as the audio backend replacement
-          pip install soundfile
+          # Install soundfile and numpy as the audio backend replacement
+          pip install soundfile numpy
 
-      - name: Run TTS with custom audio loader
+      - name: Run TTS with custom audio loader and saver
         run: |
           python -c "
           import torch
           import torchaudio
           import soundfile as sf
+          import numpy as np
 
-          # 1. Monkeypatch torchaudio.load to use soundfile instead of torchcodec
+          # 1. Monkeypatch torchaudio.load to use soundfile (READ)
           def soundfile_load(filepath, *args, **kwargs):
               data, samplerate = sf.read(filepath)
               tensor = torch.from_numpy(data).float()
@@ -46,7 +47,16 @@ jobs:
 
           torchaudio.load = soundfile_load
 
-          # 2. Run the TTS
+          # 2. Monkeypatch torchaudio.save to use soundfile (WRITE)
+          def soundfile_save(filepath, src, sample_rate, *args, **kwargs):
+              data = src.cpu().numpy()
+              if data.ndim == 2:
+                  data = data.T  # soundfile expects (frames, channels)
+              sf.write(filepath, data, sample_rate)
+
+          torchaudio.save = soundfile_save
+
+          # 3. Run the TTS
           from f5_myanmar_tts import MyanmarTTS
           tts = MyanmarTTS()
           tts.speak(
