@@ -1,0 +1,35 @@
+name: Test F5 Myanmar TTS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install PyTorch (CPU)
+        run: |
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install f5-myanmar-tts
+        run: pip install f5-myanmar-tts
+
+      - name: Run TTS
+        run: |
+          f5-myanmar "မင်္ဂလာပါ ခင်ဗျာ။ ဒီအသံက GitHub Actions ကနေ ဖန်တီးထားတာပါ။" -o output.wav
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myanmar-tts-output
+          path: output.wav
