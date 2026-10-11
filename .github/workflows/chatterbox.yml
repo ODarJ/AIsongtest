@@ -53,18 +53,25 @@ jobs:
           echo "::error::colab new failed after 3 attempts"
           exit 1
 
-      - name: Upload Python scripts to Colab
+      - name: Write poem text to file
+        run: |
+          cat > poem_text.txt << 'EOF'
+          ${{ github.event.inputs.text }}
+          EOF
+          echo "--- poem_text.txt ---"
+          cat poem_text.txt
+
+      - name: Upload inputs to Colab
         run: |
           SESSION="${{ steps.colab_new.outputs.session }}"
-          # ဖိုင်တွေက root မှာ ရှိတာမို့ colab_job/ မပါတော့ပါဘူး
-          colab --auth=adc upload -s "$SESSION" setup_chatterbox.py /content/setup_chatterbox.py
-          colab --auth=adc upload -s "$SESSION" generate_audio.py /content/generate_audio.py
+          colab --auth=adc upload -s "$SESSION" poem_text.txt /content/poem_text.txt
 
       - name: Setup Chatterbox on Colab
         run: |
           set -o pipefail
           SESSION="${{ steps.colab_new.outputs.session }}"
-          colab --auth=adc exec -s "$SESSION" -f /content/setup_chatterbox.py --timeout 1800 \
+          # -f မှာ local path (setup_chatterbox.py) ကို ပေးရပါတယ်
+          colab --auth=adc exec -s "$SESSION" -f setup_chatterbox.py --timeout 1800 \
             2>&1 | tee /tmp/exec_setup.log
           if grep -q '^FATAL:' /tmp/exec_setup.log; then
             echo "::error::setup_chatterbox.py reported FATAL"
@@ -72,12 +79,11 @@ jobs:
           fi
 
       - name: Generate Audio on Colab
-        env:
-          POEM_TEXT: ${{ github.event.inputs.text }}
         run: |
           set -o pipefail
           SESSION="${{ steps.colab_new.outputs.session }}"
-          colab --auth=adc exec -s "$SESSION" -f /content/generate_audio.py --timeout 1800 \
+          # -f မှာ local path (generate_audio.py) ကို ပေးရပါတယ်
+          colab --auth=adc exec -s "$SESSION" -f generate_audio.py --timeout 1800 \
             2>&1 | tee /tmp/exec_generate.log
           if grep -q '^FATAL:' /tmp/exec_generate.log; then
             echo "::error::generate_audio.py reported FATAL"
