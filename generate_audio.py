@@ -1,14 +1,22 @@
-# colab_job/generate_audio.py
 import os
 import sys
 import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
 
-text = os.environ.get('POEM_TEXT', '')
+# ဖိုင်ကနေ စာသားကို ဖတ်ပါ
+text_path = '/content/poem_text.txt'
+if not os.path.exists(text_path):
+    print(f"FATAL: {text_path} not found", flush=True)
+    sys.exit(1)
+
+with open(text_path, 'r', encoding='utf-8') as f:
+    text = f.read().strip()
 
 if not text:
-    print("FATAL: POEM_TEXT environment variable is empty", flush=True)
+    print("FATAL: poem_text.txt is empty", flush=True)
     sys.exit(1)
+
+print(f"Text length: {len(text)} chars", flush=True)
 
 print("Loading Chatterbox model...", flush=True)
 model = ChatterboxTTS.from_pretrained(device='cuda')
