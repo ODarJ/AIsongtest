@@ -56,8 +56,9 @@ jobs:
       - name: Upload Python scripts to Colab
         run: |
           SESSION="${{ steps.colab_new.outputs.session }}"
-          colab --auth=adc upload -s "$SESSION" colab_job/setup_chatterbox.py /content/setup_chatterbox.py
-          colab --auth=adc upload -s "$SESSION" colab_job/generate_audio.py /content/generate_audio.py
+          # ဖိုင်တွေက root မှာ ရှိတာမို့ colab_job/ မပါတော့ပါဘူး
+          colab --auth=adc upload -s "$SESSION" setup_chatterbox.py /content/setup_chatterbox.py
+          colab --auth=adc upload -s "$SESSION" generate_audio.py /content/generate_audio.py
 
       - name: Setup Chatterbox on Colab
         run: |
