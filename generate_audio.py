@@ -1,15 +1,18 @@
 import os
 import sys
-import torchaudio as ta
+import numpy as np
+import soundfile as sf
 from chatterbox.tts import ChatterboxTTS
 
-# ဖိုင်ကနေ စာသားကို ဖတ်ပါ
-text_path = '/content/poem_text.txt'
-if not os.path.exists(text_path):
-    print(f"FATAL: {text_path} not found", flush=True)
+OUTPUT_PATH = '/content/output.wav'
+TEXT_PATH = '/content/poem_text.txt'
+
+# 1. စာသားဖိုင်ကို စစ်ဆေးပါ
+if not os.path.exists(TEXT_PATH):
+    print(f"FATAL: {TEXT_PATH} not found", flush=True)
     sys.exit(1)
 
-with open(text_path, 'r', encoding='utf-8') as f:
+with open(TEXT_PATH, 'r', encoding='utf-8') as f:
     text = f.read().strip()
 
 if not text:
@@ -18,11 +21,28 @@ if not text:
 
 print(f"Text length: {len(text)} chars", flush=True)
 
+# 2. မော်ဒယ်ကို Load လုပ်ပါ
 print("Loading Chatterbox model...", flush=True)
 model = ChatterboxTTS.from_pretrained(device='cuda')
 
+# 3. အသံ ဖန်တီးပါ
 print("Generating audio...", flush=True)
 wav = model.generate(text, exaggeration=0.7, cfg_weight=0.3)
 
-ta.save('output.wav', wav, model.sr)
+# 4. torchaudio အစား soundfile နဲ့ သိမ်းပါ (torchcodec error ကို ရှောင်ဖို့)
+audio = wav.squeeze().cpu().numpy()
+sf.write(OUTPUT_PATH, audio, model.sr)
+print(f"Saved to {OUTPUT_PATH}", flush=True)
+
+# 5. ဖိုင် တကယ်ရှိမရှိ စစ်ဆေးပါ
+if not os.path.exists(OUTPUT_PATH):
+    print(f"FATAL: {OUTPUT_PATH} was not created", flush=True)
+    sys.exit(1)
+
+size = os.path.getsize(OUTPUT_PATH)
+print(f"File size: {size} bytes", flush=True)
+
+# 6. /content ထဲမှာ ဘာဖိုင်တွေ ရှိလဲ ပြပါ (debug အတွက်)
+print("Files in /content:", os.listdir('/content'), flush=True)
+
 print("Audio generated successfully!", flush=True)
