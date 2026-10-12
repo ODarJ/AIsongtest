@@ -1,4 +1,5 @@
-name: Test F5 Myanmar TTS
+
+name: Test F5 Myanmar TTS Custom Male Voice
 
 on:
   workflow_dispatch:
@@ -8,66 +9,112 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
+          cache: pip
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libsndfile1
 
-      - name: Install f5-myanmar-tts and fix audio backend
+      - name: Install Myanmar TTS
         run: |
-          pip install f5-myanmar-tts
-          # Uninstall torchcodec to prevent CUDA library errors
-          pip uninstall -y torchcodec
-          # Install soundfile and numpy as the audio backend replacement
-          pip install soundfile numpy
+          python -m pip install --upgrade pip
+          pip install f5-myanmar-tts soundfile numpy
+          pip uninstall -y torchcodec || true
 
-      - name: Run TTS with custom audio loader and saver
+      - name: Check reference voice
         run: |
-          python -c "
+          test -f voices/myanmarvoice_f5_sample.wav
+          python - <<'PY'
+          import soundfile as sf
+
+          path = "voices/myanmarvoice_f5_sample.wav"
+          info = sf.info(path)
+
+          print(info)
+
+          assert info.frames > 0, "Reference audio is empty"
+          assert info.samplerate == 24000, "Expected 24 kHz audio"
+          assert info.channels == 1, "Expected mono audio"
+          PY
+
+      - name: Generate Myanmar speech
+        run: |
+          python - <<'PY'
+          import os
           import torch
           import torchaudio
           import soundfile as sf
           import numpy as np
 
-          # 1. Monkeypatch torchaudio.load to use soundfile (READ)
+          # Use soundfile as the audio reader.
           def soundfile_load(filepath, *args, **kwargs):
-              data, samplerate = sf.read(filepath)
-              tensor = torch.from_numpy(data).float()
-              if len(tensor.shape) == 1:
-                  tensor = tensor.unsqueeze(0)
-              else:
-                  tensor = tensor.t()
+              data, samplerate = sf.read(
+                  filepath,
+                  dtype="float32",
+                  always_2d=True
+              )
+              tensor = torch.from_numpy(data.T.copy())
               return tensor, samplerate
 
-          torchaudio.load = soundfile_load
-
-          # 2. Monkeypatch torchaudio.save to use soundfile (WRITE)
+          # Use soundfile as the audio writer.
           def soundfile_save(filepath, src, sample_rate, *args, **kwargs):
-              data = src.cpu().numpy()
-              if data.ndim == 2:
-                  data = data.T  # soundfile expects (frames, channels)
-              sf.write(filepath, data, sample_rate)
+              data = src.detach().cpu().numpy()
 
+              if data.ndim == 2:
+                  data = data.T
+
+              sf.write(filepath, data, sample_rate, subtype="PCM_16")
+
+          torchaudio.load = soundfile_load
           torchaudio.save = soundfile_save
 
-          # 3. Run the TTS
           from f5_myanmar_tts import MyanmarTTS
-          tts = MyanmarTTS()
-          tts.speak(
-              'မင်္ဂလာပါ ခင်ဗျာ။ ဒီအသံက GitHub Actions ကနေ ဖန်တီးထားတာပါ။',
-              output_file='output.wav'
-          )
-          print('Audio generated successfully!')
-          "
 
-      - name: Upload artifact
+          reference_audio = "voices/myanmarvoice_f5_sample.wav"
+
+          reference_text = (
+              "မြန်မာနိုင်ငံအထက်ပိုင်းကရွာငယ်လေးတစ်ရွာမှာ "
+              "အဘိုးဦးဘသာဆိုတဲ့လူအိုကြီးတစ်ယောက်ရှိပါတယ် "
+              "သူ့မှာအလွန်ရှေးကျတဲ့ကျေးခေါင်းလောင်းလေးတစ်လုံးရှိပြီး"
+          )
+
+          target_text = (
+              "မင်္ဂလာပါ ခင်ဗျာ။ "
+              "မြန်မာနိုင်ငံရဲ့ ရှေးဟောင်းပုံပြင်လေးတစ်ပုဒ်ကို "
+              "အခု နားဆင်ကြရအောင်။"
+          )
+
+          tts = MyanmarTTS()
+
+          tts.speak(
+              target_text,
+              ref_audio=reference_audio,
+              ref_text=reference_text,
+              output_file="output.wav"
+          )
+
+          if not os.path.isfile("output.wav"):
+              raise RuntimeError("TTS failed to create output.wav")
+
+          info = sf.info("output.wav")
+          if info.frames == 0:
+              raise RuntimeError("Generated audio is empty")
+
+          print(f"Generated audio: {info}")
+          PY
+
+      - name: Upload generated audio
         uses: actions/upload-artifact@v4
         with:
-          name: myanmar-tts-output
+          name: myanmar-tts-custom-male-voice
           path: output.wav
+          if-no-files-found: error
+          retention-days: 7
