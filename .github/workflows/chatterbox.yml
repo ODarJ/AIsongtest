@@ -4,9 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       text:
-        description: 'Poem text to synthesize'
+        description: 'Poem text (use | between stanzas)'
         required: true
-        default: 'Two roads diverged in a yellow wood, And sorry I could not travel both And be one traveler, long I stood And looked down one as far as I could To where it bent in the undergrowth;'
+        default: 'The evening light falls soft and slow, Across the fields where wild grass grows. | A quiet wind begins to sing, Of distant hills and early spring. | The river carries all my dreams, Beyond the bend where silver gleams.'
+      voice:
+        description: 'Voice (file in voices/ folder)'
+        required: true
+        type: choice
+        default: default
+        options:
+          - default
+          - voice1
+          - voice2
 
 jobs:
   synthesize:
@@ -65,6 +74,17 @@ jobs:
         run: |
           SESSION="${{ steps.colab_new.outputs.session }}"
           colab --auth=adc upload -s "$SESSION" poem_text.txt /content/poem_text.txt
+
+      - name: Upload voice to Colab
+        if: ${{ github.event.inputs.voice != 'default' }}
+        run: |
+          SESSION="${{ steps.colab_new.outputs.session }}"
+          VOICE_FILE="voices/${{ github.event.inputs.voice }}.wav"
+          if [ ! -f "$VOICE_FILE" ]; then
+            echo "::error::$VOICE_FILE not found in repo"
+            exit 1
+          fi
+          colab --auth=adc upload -s "$SESSION" "$VOICE_FILE" /content/voice.wav
 
       - name: Setup Chatterbox on Colab
         run: |
