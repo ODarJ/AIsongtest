@@ -1,18 +1,21 @@
-name: Test F5 Myanmar TTS Custom Male Voice
+name: Myanmar Story TTS
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  tts:
+  generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -22,45 +25,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg libsndfile1
 
-      - name: Install Myanmar TTS
+      - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          python -m pip install f5-myanmar-tts soundfile numpy
+          pip install f5-myanmar-tts soundfile numpy
 
-      - name: Check reference voice
+      - name: Generate Burmese story audio
         run: |
           python - <<'PY'
           import os
-          import soundfile as sf
-
-          path = "voices/myanmarvoice_f5_sample.wav"
-
-          if not os.path.isfile(path):
-              raise FileNotFoundError(
-                  f"Reference voice not found: {path}"
-              )
-
-          info = sf.info(path)
-          print(info)
-
-          if info.frames == 0:
-              raise RuntimeError("Reference audio is empty")
-
-          if info.channels != 1:
-              raise RuntimeError("Reference audio must be mono")
-
-          if info.samplerate != 24000:
-              raise RuntimeError(
-                  f"Expected 24000 Hz, got {info.samplerate} Hz"
-              )
-
-          print("Reference audio check passed.")
-          PY
-
-      - name: Generate Myanmar speech
-        run: |
-          python - <<'PY'
-          import os
+          import re
+          import numpy as np
           import soundfile as sf
           from f5_myanmar_tts import MyanmarTTS
 
@@ -71,6 +46,11 @@ jobs:
               "အဘိုးဦးဘသာဆိုတဲ့လူအိုကြီးတစ်ယောက်ရှိပါတယ် "
               "သူ့မှာအလွန်ရှေးကျတဲ့ကျေးခေါင်းလောင်းလေးတစ်လုံးရှိပြီး"
           )
+
+          if not os.path.isfile(reference_audio):
+              raise FileNotFoundError(
+                  f"Reference voice not found: {reference_audio}"
+              )
 
           target_text = """
           ရှေးဟောင်းကျေးခေါင်းလောင်းလေး၏ လျှို့ဝှက်ချက်
@@ -225,32 +205,121 @@ jobs:
           စိတ်ထားကသာ အဖိုးတန်ဆုံး ရတနာဖြစ်ပါတယ်။
           """
 
+          # စာသားကို စာကြောင်းနှင့် စာပိုဒ်အလိုက် ခွဲမည်
+          sentences = [
+              s.strip()
+              for s in re.split(r"(?<=[။!?])\s+|\n+", target_text)
+              if s.strip()
+          ]
+
+          # အပိုင်းတစ်ပိုင်းလျှင် အများဆုံး 250 characters
+          chunks = []
+          current = ""
+
+          for sentence in sentences:
+              while len(sentence) > 250:
+                  if current:
+                      chunks.append(current)
+                      current = ""
+
+                  # ရှည်လွန်းသော စာကြောင်းကို အပိုင်းတိုခွဲမည်
+                  cut = sentence.rfind(" ", 0, 250)
+                  if cut < 100:
+                      cut = 250
+
+                  chunks.append(sentence[:cut].strip())
+                  sentence = sentence[cut:].strip()
+
+              if not sentence:
+                  continue
+
+              if len(current) + len(sentence) + 1 > 250:
+                  if current:
+                      chunks.append(current)
+                  current = sentence
+              else:
+                  current = (current + " " + sentence).strip()
+
+          if current:
+              chunks.append(current)
+
+          print(f"Total chunks: {len(chunks)}")
+
+          # Model ကို တစ်ကြိမ်သာ ဖွင့်မည်
           tts = MyanmarTTS()
+          audio_parts = []
+          sample_rate = None
+          channels = None
 
-          tts.speak(
-              target_text,
-              ref_audio=reference_audio,
-              ref_text=reference_text,
-              output_file="output.wav"
-          )
+          for i, chunk in enumerate(chunks, start=1):
+              print(f"Generating chunk {i}/{len(chunks)}")
 
-          if not os.path.isfile("output.wav"):
-              raise RuntimeError(
-                  "TTS did not create output.wav"
+              temp_file = f"chunk_{i:03d}.wav"
+
+              tts.speak(
+                  chunk,
+                  ref_audio=reference_audio,
+                  ref_text=reference_text,
+                  output_file=temp_file,
               )
 
-          info = sf.info("output.wav")
+              audio, sr = sf.read(temp_file, dtype="float32")
 
+              if audio.size == 0:
+                  raise RuntimeError(f"Empty audio in chunk {i}")
+
+              if sample_rate is None:
+                  sample_rate = sr
+                  channels = 1 if audio.ndim == 1 else audio.shape[1]
+              elif sr != sample_rate:
+                  raise RuntimeError("Sample rates do not match")
+
+              # အသံအားလုံး channel တူညီအောင် ပြင်မည်
+              if audio.ndim == 1 and channels == 2:
+                  audio = np.column_stack([audio, audio])
+              elif audio.ndim == 2 and channels == 1:
+                  audio = audio.mean(axis=1)
+
+              audio_parts.append(audio)
+              os.remove(temp_file)
+
+          # အပိုင်းကြားတွင် 0.25 စက္ကန့် နားချိန်
+          if channels == 1:
+              silence = np.zeros(
+                  int(sample_rate * 0.25), dtype=np.float32
+              )
+          else:
+              silence = np.zeros(
+                  (int(sample_rate * 0.25), channels),
+                  dtype=np.float32
+              )
+
+          combined = []
+          for i, audio in enumerate(audio_parts):
+              if i > 0:
+                  combined.append(silence)
+              combined.append(audio)
+
+          output = np.concatenate(combined, axis=0)
+
+          sf.write(
+              "output.wav",
+              output,
+              sample_rate,
+              subtype="PCM_16"
+          )
+
+          info = sf.info("output.wav")
           if info.frames == 0:
               raise RuntimeError("Generated audio is empty")
 
-          print(f"Generated audio: {info}")
+          print(f"SUCCESS: {info}")
           PY
 
       - name: Upload generated audio
         uses: actions/upload-artifact@v4
         with:
-          name: myanmar-tts-custom-male-voice
+          name: myanmar-story-audio
           path: output.wav
           if-no-files-found: error
           retention-days: 7
